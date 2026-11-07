@@ -1,8 +1,8 @@
 namespace DraftAnalyzer.Core.Models;
 
 public sealed record BattleState(
-    ActivePokemon? P1a,
-    ActivePokemon? P1b,
-    ActivePokemon? P2a,
-    ActivePokemon? P2b,
+    PlayerState? P1a,
+    PlayerState? P1b,
+    PlayerState? P2a,
+    PlayerState? P2b,
     IReadOnlyList<FieldEffect> FieldEffects);

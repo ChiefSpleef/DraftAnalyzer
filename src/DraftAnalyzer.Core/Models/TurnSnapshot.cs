@@ -5,8 +5,8 @@ public sealed record TurnSnapshot(
     BattleState StartState,
     IReadOnlyList<GameEvent> Events)
 {
-    public ActivePokemon? P1a => StartState.P1a;
-    public ActivePokemon? P1b => StartState.P1b;
-    public ActivePokemon? P2a => StartState.P2a;
-    public ActivePokemon? P2b => StartState.P2b;
+    public PlayerState? P1a => StartState.P1a;
+    public PlayerState? P1b => StartState.P1b;
+    public PlayerState? P2a => StartState.P2a;
+    public PlayerState? P2b => StartState.P2b;
 }

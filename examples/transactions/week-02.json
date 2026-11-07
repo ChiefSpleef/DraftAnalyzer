@@ -1,0 +1,7 @@
+{
+  "week": 2,
+  "transactions": [
+    { "player": "Latios", "fromTeam": "RAIN", "toTeam": "KEYS" },
+    { "player": "Whimsicott", "fromTeam": "KEYS", "toTeam": "RAIN" }
+  ]
+}

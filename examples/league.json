@@ -1,0 +1,30 @@
+{
+  "name": "Example League",
+  "teams": [
+    {
+      "code": "RAIN",
+      "name": "Example Rain Team",
+      "coach": {
+        "name": "Aerochill",
+        "replayNames": ["Aerochill"]
+      },
+      "roster": [
+        "Politoed", "Archaludon", "Rillaboom", "Kingdra",
+        "Torracat", "Sneasler", "Latios", "Clawitzer"
+      ]
+    },
+    {
+      "code": "KEYS",
+      "name": "Example Keys Team",
+      "coach": {
+        "name": "navicorrin",
+        "replayNames": ["navicorrin"]
+      },
+      "roster": [
+        "Flutter Mane", "Farigiraf", "Iron Hands", "Klefki",
+        "Ribombee", "Overqwil", "Whimsicott", "Armarouge"
+      ]
+    }
+  ],
+  "aliases": {}
+}

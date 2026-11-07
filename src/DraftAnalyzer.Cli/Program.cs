@@ -1,20 +1,36 @@
+using DraftAnalyzer.Core.Metadata;
 using DraftAnalyzer.Core.Models;
 using DraftAnalyzer.Core.Parsing;
 
-bool showEvents = args.Length == 2 && args[0] == "--events";
-if (args.Length != 1 && !showEvents)
+CliOptions options;
+try
 {
-    Console.Error.WriteLine("Usage: DraftAnalyzer.Cli [--events] <replay file>");
+    options = CliOptions.Parse(args);
+}
+catch (ArgumentException error)
+{
+    Console.Error.WriteLine(error.Message);
+    Console.Error.WriteLine(
+        "Usage: DraftAnalyzer.Cli [--events] [--league <file> --week <number> " +
+        "[--transactions <directory>] [--game <number>]] <replay file>");
     return 2;
 }
 
 try
 {
-    using var reader = File.OpenText(args[^1]);
-    BattleReplay replay = ReplayParser.Parse(reader);
+    using var reader = File.OpenText(options.ReplayFile);
+    BattleReplay replay = options.LeagueFile is null
+        ? ReplayParser.Parse(reader)
+        : ReplayParser.Parse(reader,
+            LeagueLoader.Load(options.LeagueFile, options.TransactionsDirectory),
+            options.Week, options.GameNumber);
 
     Console.WriteLine($"{replay.Player1 ?? "Player 1"} vs. {replay.Player2 ?? "Player 2"}");
-    if (showEvents && replay.SetupEvents.Count > 0)
+    if (replay.Game is not null)
+        Console.WriteLine(replay.Game);
+    PrintRoster("p1", replay.Roster1);
+    PrintRoster("p2", replay.Roster2);
+    if (options.ShowEvents && replay.SetupEvents.Count > 0)
     {
         Console.WriteLine("Before turn 1");
         PrintEvents(replay.SetupEvents);
@@ -26,16 +42,25 @@ try
         Console.WriteLine(
             $"{turn.Number} | {Describe(turn.P1a)} | {Describe(turn.P1b)} | " +
             $"{Describe(turn.P2a)} | {Describe(turn.P2b)}");
-        if (showEvents)
+        if (options.ShowEvents)
             PrintEvents(turn.Events);
     }
 
     return 0;
 }
-catch (Exception error) when (error is IOException or UnauthorizedAccessException or FormatException)
+catch (Exception error) when (error is IOException or UnauthorizedAccessException or FormatException
+    or ArgumentException or InvalidOperationException)
 {
     Console.Error.WriteLine(error.Message);
     return 1;
+}
+
+static void PrintRoster(string side, GameRoster? roster)
+{
+    if (roster is not null)
+        Console.WriteLine(
+            $"{side} {roster.Team.Code} / {roster.Team.Name} / Coach {roster.Team.Coach.Name}: " +
+            string.Join(", ", roster.Players.Select(player => player.Species)));
 }
 
 static void PrintEvents(IReadOnlyList<GameEvent> events)
@@ -74,7 +99,7 @@ static void PrintHpChange(string slot, double? before, double? after)
 
 static string DescribeHp(double? hp) => hp is double value ? $"{value:0.##}%" : "?";
 
-static string Describe(ActivePokemon? pokemon)
+static string Describe(PlayerState? pokemon)
 {
     if (pokemon is null)
         return "-";

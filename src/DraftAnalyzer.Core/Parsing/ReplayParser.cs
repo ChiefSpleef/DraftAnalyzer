@@ -6,18 +6,33 @@ namespace DraftAnalyzer.Core.Parsing;
 public static class ReplayParser
 {
     public static BattleReplay Parse(TextReader reader)
+        => ParseCore(reader, null, 1, 1);
+
+    public static BattleReplay Parse(TextReader reader, League league, int week, int gameNumber = 1)
+    {
+        ArgumentNullException.ThrowIfNull(league);
+        if (week < 1 || gameNumber < 1)
+            throw new ArgumentException("Week and game number must be positive.");
+        return ParseCore(reader, league, week, gameNumber);
+    }
+
+    private static BattleReplay ParseCore(TextReader reader, League? league, int week, int gameNumber)
     {
         ArgumentNullException.ThrowIfNull(reader);
 
         var turns = new List<TurnSnapshot>();
         var setup = new List<GameEvent>();
         var events = setup;
-        var board = new ActivePokemon?[4];
+        var board = new PlayerState?[4];
         var state = new BattleState(null, null, null, null, Array.Empty<FieldEffect>());
         BattleState turnStart = state;
         int? turnNumber = null;
         string? player1 = null;
         string? player2 = null;
+        var preview = new List<(string Side, string Species)>();
+        GameKey? game = null;
+        GameRoster? roster1 = null;
+        GameRoster? roster2 = null;
         bool started = false;
         int lineNumber = 0;
 
@@ -43,7 +58,31 @@ public static class ReplayParser
                         else if (Field(2) == "p2")
                             player2 = Field(3);
                         break;
+                    case "clearpoke":
+                        preview.Clear();
+                        break;
+                    case "poke":
+                        preview.Add((Field(2), ReadSpecies()));
+                        break;
                     case "start":
+                        if (league is not null)
+                        {
+                            Team team1 = league.GetTeamByReplayName(player1 ?? throw Error("Missing p1 coach name."));
+                            Team team2 = league.GetTeamByReplayName(player2 ?? throw Error("Missing p2 coach name."));
+                            game = new GameKey(week, team1.Code, team2.Code, gameNumber);
+                            roster1 = league.CreateGameRoster(game, team1);
+                            roster2 = league.CreateGameRoster(game, team2);
+                            foreach (var entry in preview)
+                            {
+                                GameRoster roster = entry.Side switch
+                                {
+                                    "p1" => roster1,
+                                    "p2" => roster2,
+                                    _ => throw Error($"Unknown preview side '{entry.Side}'.")
+                                };
+                                league.ResolvePlayer(roster, entry.Species);
+                            }
+                        }
                         started = true;
                         break;
                 }
@@ -78,8 +117,9 @@ public static class ReplayParser
                     int slot = GetSlot(pokemon);
                     string nickname = pokemon[(pokemon.IndexOf(':') + 1)..].Trim();
                     double? previousHp = command == "replace" ? board[slot]?.Hp : null;
-                    board[slot] = new ActivePokemon(nickname, ReadSpecies())
+                    board[slot] = new PlayerState(nickname, ReadSpecies())
                     {
+                        Player = league?.ResolvePlayer(slot < 2 ? roster1! : roster2!, ReadSpecies()),
                         Hp = fields.Length > 4 && fields[4].Length > 0
                             ? ReadHp(fields[4])
                             : previousHp
@@ -174,10 +214,15 @@ public static class ReplayParser
         if (turns.Count == 0)
             throw new FormatException("No turn markers found after the battle start.");
 
-        return new BattleReplay(player1, player2, turns.AsReadOnly())
+        var replay = new BattleReplay(player1, player2, turns.AsReadOnly())
         {
+            Game = game,
+            Roster1 = roster1,
+            Roster2 = roster2,
             SetupEvents = setup.AsReadOnly()
         };
+        league?.Register(replay);
+        return replay;
 
         void FinishTurn()
         {
