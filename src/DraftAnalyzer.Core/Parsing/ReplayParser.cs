@@ -77,7 +77,24 @@ public static class ReplayParser
                     string pokemon = Field(2);
                     int slot = GetSlot(pokemon);
                     string nickname = pokemon[(pokemon.IndexOf(':') + 1)..].Trim();
-                    board[slot] = new ActivePokemon(nickname, ReadSpecies());
+                    double? previousHp = command == "replace" ? board[slot]?.Hp : null;
+                    board[slot] = new ActivePokemon(nickname, ReadSpecies())
+                    {
+                        Hp = fields.Length > 4 && fields[4].Length > 0
+                            ? ReadHp(fields[4])
+                            : previousHp
+                    };
+                    break;
+                case "-damage":
+                case "-heal":
+                case "-sethp":
+                    ApplyHp(2);
+                    // Some logs include a second Pokémon/HP pair on the same sethp event.
+                    if (command == "-sethp" && fields.Length > 4 &&
+                        fields[4].Length > 0 && !fields[4].StartsWith('['))
+                    {
+                        ApplyHp(4);
+                    }
                     break;
                 case "faint":
                     board[GetSlot(Field(2))] = null;
@@ -96,8 +113,7 @@ public static class ReplayParser
                 case "detailschange":
                 case "-formechange":
                     string changed = Field(2);
-                    if (changed.StartsWith("p1:", StringComparison.Ordinal) ||
-                        changed.StartsWith("p2:", StringComparison.Ordinal))
+                    if (IsBenched(changed))
                         break; // The replay can report a form change for a benched Pokémon.
 
                     int changedSlot = GetSlot(changed);
@@ -141,6 +157,17 @@ public static class ReplayParser
             }
 
             string ReadSpecies() => Field(3).Split(',', 2)[0].Trim();
+
+            void ApplyHp(int targetIndex)
+            {
+                string target = Field(targetIndex);
+                if (IsBenched(target))
+                    return;
+
+                int targetSlot = GetSlot(target);
+                if (board[targetSlot] is { } active)
+                    board[targetSlot] = active with { Hp = ReadHp(Field(targetIndex + 1)) };
+            }
         }
 
         FinishTurn();
@@ -160,6 +187,18 @@ public static class ReplayParser
 
         FormatException Error(string message) => new($"Replay line {lineNumber}. {message}");
 
+        double ReadHp(string condition)
+        {
+            try
+            {
+                return HpPercentageParser.Parse(condition);
+            }
+            catch (FormatException error)
+            {
+                throw Error(error.Message);
+            }
+        }
+
         int GetSlot(string pokemon)
         {
             int separator = pokemon.IndexOf(':');
@@ -173,6 +212,10 @@ public static class ReplayParser
             } : throw Error($"Invalid active Pokémon field '{pokemon}'.");
         }
     }
+
+    private static bool IsBenched(string pokemon) =>
+        pokemon.StartsWith("p1:", StringComparison.Ordinal) ||
+        pokemon.StartsWith("p2:", StringComparison.Ordinal);
 
     private static bool IsBattleEvent(string command) =>
         command.StartsWith('-') ||

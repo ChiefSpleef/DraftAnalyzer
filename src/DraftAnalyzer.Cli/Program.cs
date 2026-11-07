@@ -47,6 +47,16 @@ static void PrintEvents(IReadOnlyList<GameEvent> events)
             continue;
 
         BattleState state = gameEvent.After;
+        if (gameEvent.Command is "-damage" or "-heal" or "-sethp")
+        {
+            BattleState before = gameEvent.Before;
+            PrintHpChange("p1a", before.P1a?.Hp, state.P1a?.Hp);
+            PrintHpChange("p1b", before.P1b?.Hp, state.P1b?.Hp);
+            PrintHpChange("p2a", before.P2a?.Hp, state.P2a?.Hp);
+            PrintHpChange("p2b", before.P2b?.Hp, state.P2b?.Hp);
+            continue;
+        }
+
         var effects = state.FieldEffects.Select(effect =>
             $"{effect.Name}{(effect.Side is null ? "" : $" ({effect.Side})")}" +
             $"{(effect.Layers > 1 ? $" x{effect.Layers}" : "")}");
@@ -56,12 +66,21 @@ static void PrintEvents(IReadOnlyList<GameEvent> events)
     }
 }
 
+static void PrintHpChange(string slot, double? before, double? after)
+{
+    if (before != after)
+        Console.WriteLine($"       {slot} HP: {DescribeHp(before)} -> {DescribeHp(after)}");
+}
+
+static string DescribeHp(double? hp) => hp is double value ? $"{value:0.##}%" : "?";
+
 static string Describe(ActivePokemon? pokemon)
 {
     if (pokemon is null)
         return "-";
 
-    return pokemon.Nickname == pokemon.Species || pokemon.Nickname.Length == 0
+    string name = pokemon.Nickname == pokemon.Species || pokemon.Nickname.Length == 0
         ? pokemon.Species
         : $"{pokemon.Species} ({pokemon.Nickname})";
+    return pokemon.Hp is null ? name : $"{name} [{DescribeHp(pokemon.Hp)}]";
 }
