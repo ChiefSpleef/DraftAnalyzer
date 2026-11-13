@@ -12,6 +12,7 @@ public sealed class League
     private readonly Dictionary<string, string> aliases = new(StringComparer.OrdinalIgnoreCase);
     private readonly SortedDictionary<int, IReadOnlyDictionary<string, IReadOnlyList<Player>>> weeklyRosters = new();
     private readonly Dictionary<GameKey, BattleReplay> games = new();
+    private readonly Dictionary<MatchKey, BattleMatch> matches = new();
 
     internal League(LeagueInfo info)
     {
@@ -88,6 +89,94 @@ public sealed class League
         {
             lock (syncRoot)
                 return new ReadOnlyDictionary<GameKey, BattleReplay>(new Dictionary<GameKey, BattleReplay>(games));
+        }
+    }
+
+    public IReadOnlyDictionary<MatchKey, BattleMatch> Matches
+    {
+        get
+        {
+            lock (syncRoot)
+                return new ReadOnlyDictionary<MatchKey, BattleMatch>(new Dictionary<MatchKey, BattleMatch>(matches));
+        }
+    }
+
+    public IReadOnlyDictionary<int, LeagueWeek> Weeks
+    {
+        get
+        {
+            lock (syncRoot)
+            {
+                int[] weeks = games.Keys.Select(game => game.Week)
+                    .Concat(weeklyRosters.Keys.Where(week => week > 0)).Distinct().Order().ToArray();
+                return new ReadOnlyDictionary<int, LeagueWeek>(weeks.ToDictionary(week => week, GetWeek));
+            }
+        }
+    }
+
+    public IReadOnlyList<BattleReplay> GetGames(int week) => GetGames(week, week);
+
+    public IReadOnlyList<BattleReplay> GetGames(int firstWeek, int lastWeek)
+    {
+        _ = WeekRange.Enumerate(firstWeek, lastWeek);
+        lock (syncRoot)
+            return Array.AsReadOnly(games.Values
+                .Where(game => game.Game.Week >= firstWeek && game.Game.Week <= lastWeek)
+                .OrderBy(game => game.Game.Week).ThenBy(game => game.Game.Team1)
+                .ThenBy(game => game.Game.Team2).ThenBy(game => game.Game.Number).ToArray());
+    }
+
+    public IReadOnlyList<BattleMatch> GetMatches(int week) => GetMatches(week, week);
+
+    public IReadOnlyList<BattleMatch> GetMatches(int firstWeek, int lastWeek)
+    {
+        _ = WeekRange.Enumerate(firstWeek, lastWeek);
+        lock (syncRoot)
+            return Array.AsReadOnly(matches.Values
+                .Where(match => match.Week >= firstWeek && match.Week <= lastWeek)
+                .OrderBy(match => match.Week).ThenBy(match => match.Key.Team1)
+                .ThenBy(match => match.Key.Team2).ToArray());
+    }
+
+    public LeagueWeek GetWeek(int week)
+    {
+        lock (syncRoot)
+        {
+            var rosters = teams.Values.ToDictionary(team => team.Code, team => GetRoster(team.Code, week),
+                StringComparer.OrdinalIgnoreCase);
+            return new LeagueWeek(week,
+                new ReadOnlyDictionary<string, IReadOnlyList<Player>>(rosters), GetGames(week), GetMatches(week));
+        }
+    }
+
+    public IReadOnlyDictionary<int, LeagueWeek> GetWeeks(int firstWeek, int lastWeek)
+    {
+        lock (syncRoot)
+            return new ReadOnlyDictionary<int, LeagueWeek>(
+                WeekRange.Enumerate(firstWeek, lastWeek).ToDictionary(week => week, GetWeek));
+    }
+
+    public IReadOnlyDictionary<int, IReadOnlyList<Player>> GetRosters(string teamCode, int firstWeek, int lastWeek)
+    {
+        lock (syncRoot)
+            return new ReadOnlyDictionary<int, IReadOnlyList<Player>>(
+                WeekRange.Enumerate(firstWeek, lastWeek).ToDictionary(week => week, week => GetRoster(teamCode, week)));
+    }
+
+    public IReadOnlyDictionary<int, Team?> GetPlayerTeams(string species, int firstWeek, int lastWeek)
+    {
+        lock (syncRoot)
+            return new ReadOnlyDictionary<int, Team?>(
+                WeekRange.Enumerate(firstWeek, lastWeek).ToDictionary(week => week, week => GetPlayerTeam(species, week)));
+    }
+
+    public Team? GetPlayerTeam(string species, int week)
+    {
+        lock (syncRoot)
+        {
+            if (!players.TryGetValue(species, out Player? player))
+                throw new ArgumentException($"Unknown league player '{species}'.", nameof(species));
+            return teams.Values.SingleOrDefault(team => GetRoster(team.Code, week).Contains(player));
         }
     }
 
@@ -174,21 +263,25 @@ public sealed class League
                 $"'{replaySpecies}' is absent from {roster.Team.Code}'s roster in week {roster.Game.Week}.");
     }
 
-    internal void Register(BattleReplay replay)
+    internal void RegisterMatch(BattleMatch match)
     {
         lock (syncRoot)
         {
-            if (replay.Game is not { } game || replay.Roster1 is not { } roster1 || replay.Roster2 is not { } roster2)
-                throw new ArgumentException("A league game requires a key and both rosters.");
-            foreach (GameRoster roster in new[] { roster1, roster2 })
+            if (matches.ContainsKey(match.Key))
+                throw new InvalidOperationException($"Match '{match.Key}' is already registered.");
+            foreach (BattleReplay replay in match.Games)
             {
-                if (GetTeam(roster.Team.Code) != roster.Team || roster.Game != game ||
-                    !GetRoster(roster.Team.Code, game.Week).SequenceEqual(roster.Players))
-                    throw new InvalidOperationException("The game's roster metadata changed while parsing.");
+                foreach (GameRoster roster in new[] { replay.Roster1, replay.Roster2 })
+                {
+                    if (GetTeam(roster.Team.Code) != roster.Team || roster.Game != replay.Game ||
+                        !GetRoster(roster.Team.Code, replay.Game.Week).SequenceEqual(roster.Players))
+                        throw new InvalidOperationException("The game's roster metadata changed while parsing.");
+                }
             }
 
-            if (!games.TryAdd(game, replay))
-                throw new InvalidOperationException($"Game '{game}' is already registered.");
+            foreach (BattleReplay replay in match.Games)
+                games.Add(replay.Game, replay);
+            matches.Add(match.Key, match);
         }
     }
 
@@ -203,7 +296,7 @@ public sealed class League
         lock (syncRoot)
         {
             var result = games.Values
-                .SelectMany(game => new[] { game.Roster1!, game.Roster2! })
+                .SelectMany(game => new[] { game.Roster1, game.Roster2 })
                 .Where(includes)
                 .ToDictionary(roster => roster.Game);
             return new ReadOnlyDictionary<GameKey, GameRoster>(result);

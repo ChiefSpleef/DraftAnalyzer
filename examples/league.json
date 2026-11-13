@@ -5,24 +5,24 @@
       "code": "RAIN",
       "name": "Example Rain Team",
       "coach": {
-        "name": "Aerochill",
-        "replayNames": ["Aerochill"]
+        "name": "Example Coach Alpha",
+        "replayNames": ["examplecoachalpha"]
       },
       "roster": [
-        "Politoed", "Archaludon", "Rillaboom", "Kingdra",
-        "Torracat", "Sneasler", "Latios", "Clawitzer"
+        "Charmander", "Squirtle", "Bulbasaur", "Eevee",
+        "Psyduck", "Growlithe", "Cubone", "Jigglypuff"
       ]
     },
     {
       "code": "KEYS",
       "name": "Example Keys Team",
       "coach": {
-        "name": "navicorrin",
-        "replayNames": ["navicorrin"]
+        "name": "Example Coach Beta",
+        "replayNames": ["examplecoachbeta"]
       },
       "roster": [
-        "Flutter Mane", "Farigiraf", "Iron Hands", "Klefki",
-        "Ribombee", "Overqwil", "Whimsicott", "Armarouge"
+        "Pidgey", "Sandshrew", "Magnemite", "Abra",
+        "Machop", "Geodude", "Slowpoke", "Dratini"
       ]
     }
   ],

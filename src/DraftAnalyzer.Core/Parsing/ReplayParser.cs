@@ -1,22 +1,12 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using DraftAnalyzer.Core.Models;
 
 namespace DraftAnalyzer.Core.Parsing;
 
-public static class ReplayParser
+internal static class ReplayParser
 {
-    public static BattleReplay Parse(TextReader reader)
-        => ParseCore(reader, null, 1, 1);
-
-    public static BattleReplay Parse(TextReader reader, League league, int week, int gameNumber = 1)
-    {
-        ArgumentNullException.ThrowIfNull(league);
-        if (week < 1 || gameNumber < 1)
-            throw new ArgumentException("Week and game number must be positive.");
-        return ParseCore(reader, league, week, gameNumber);
-    }
-
-    private static BattleReplay ParseCore(TextReader reader, League? league, int week, int gameNumber)
+    internal static BattleReplay Parse(TextReader reader, League league, int week)
     {
         ArgumentNullException.ThrowIfNull(reader);
 
@@ -33,6 +23,9 @@ public static class ReplayParser
         GameKey? game = null;
         GameRoster? roster1 = null;
         GameRoster? roster2 = null;
+        int? replayGameNumber = null;
+        Team? winner = null;
+        bool finished = false;
         bool started = false;
         int lineNumber = 0;
 
@@ -58,6 +51,15 @@ public static class ReplayParser
                         else if (Field(2) == "p2")
                             player2 = Field(3);
                         break;
+                    case "uhtml":
+                    case "uhtmlchange":
+                        if (fields.Length > 3 && fields[2] == "bestof")
+                        {
+                            var numberMatch = Regex.Match(fields[3], @"<strong>Game\s+(\d+)");
+                            if (numberMatch.Success)
+                                replayGameNumber = int.Parse(numberMatch.Groups[1].Value, CultureInfo.InvariantCulture);
+                        }
+                        break;
                     case "clearpoke":
                         preview.Clear();
                         break;
@@ -65,23 +67,21 @@ public static class ReplayParser
                         preview.Add((Field(2), ReadSpecies()));
                         break;
                     case "start":
-                        if (league is not null)
+                        Team team1 = league.GetTeamByReplayName(player1 ?? throw Error("Missing p1 coach name."));
+                        Team team2 = league.GetTeamByReplayName(player2 ?? throw Error("Missing p2 coach name."));
+                        game = new GameKey(week, team1.Code, team2.Code,
+                            replayGameNumber ?? throw Error("Missing best-of-three game number."));
+                        roster1 = league.CreateGameRoster(game, team1);
+                        roster2 = league.CreateGameRoster(game, team2);
+                        foreach (var entry in preview)
                         {
-                            Team team1 = league.GetTeamByReplayName(player1 ?? throw Error("Missing p1 coach name."));
-                            Team team2 = league.GetTeamByReplayName(player2 ?? throw Error("Missing p2 coach name."));
-                            game = new GameKey(week, team1.Code, team2.Code, gameNumber);
-                            roster1 = league.CreateGameRoster(game, team1);
-                            roster2 = league.CreateGameRoster(game, team2);
-                            foreach (var entry in preview)
+                            GameRoster roster = entry.Side switch
                             {
-                                GameRoster roster = entry.Side switch
-                                {
-                                    "p1" => roster1,
-                                    "p2" => roster2,
-                                    _ => throw Error($"Unknown preview side '{entry.Side}'.")
-                                };
-                                league.ResolvePlayer(roster, entry.Species);
-                            }
+                                "p1" => roster1,
+                                "p2" => roster2,
+                                _ => throw Error($"Unknown preview side '{entry.Side}'.")
+                            };
+                            league.ResolvePlayer(roster, entry.Species);
                         }
                         started = true;
                         break;
@@ -116,14 +116,10 @@ public static class ReplayParser
                     string pokemon = Field(2);
                     int slot = GetSlot(pokemon);
                     string nickname = pokemon[(pokemon.IndexOf(':') + 1)..].Trim();
-                    double? previousHp = command == "replace" ? board[slot]?.Hp : null;
-                    board[slot] = new PlayerState(nickname, ReadSpecies())
-                    {
-                        Player = league?.ResolvePlayer(slot < 2 ? roster1! : roster2!, ReadSpecies()),
-                        Hp = fields.Length > 4 && fields[4].Length > 0
-                            ? ReadHp(fields[4])
-                            : previousHp
-                    };
+                    string species = ReadSpecies();
+                    board[slot] = new PlayerState(
+                        league.ResolvePlayer(slot < 2 ? roster1! : roster2!, species),
+                        nickname, species, ReadHp(Field(4)));
                     break;
                 case "-damage":
                 case "-heal":
@@ -186,7 +182,17 @@ public static class ReplayParser
 
             events.Add(new GameEvent(command, Array.AsReadOnly(arguments), lineNumber, before, state));
             if (command is "win" or "tie")
+            {
+                if (command == "win")
+                {
+                    string name = Field(2);
+                    winner = name.Equals(player1, StringComparison.OrdinalIgnoreCase) ? roster1!.Team :
+                        name.Equals(player2, StringComparison.OrdinalIgnoreCase) ? roster2!.Team :
+                        throw Error($"Winner '{name}' is not a replay participant.");
+                }
+                finished = true;
                 break;
+            }
 
             string Field(int index)
             {
@@ -213,16 +219,13 @@ public static class ReplayParser
         FinishTurn();
         if (turns.Count == 0)
             throw new FormatException("No turn markers found after the battle start.");
+        if (!finished)
+            throw Error("The replay has no final result.");
 
-        var replay = new BattleReplay(player1, player2, turns.AsReadOnly())
+        return new BattleReplay(game!, roster1!, roster2!, turns.AsReadOnly(), winner)
         {
-            Game = game,
-            Roster1 = roster1,
-            Roster2 = roster2,
             SetupEvents = setup.AsReadOnly()
         };
-        league?.Register(replay);
-        return replay;
 
         void FinishTurn()
         {

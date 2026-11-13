@@ -426,3 +426,9 @@ FodyWeavers.xsd
 
 # Official VS Code C# Dev Kit Extension exclusion
 #*.lscache
+
+# Private league data, transactions, and replays
+/data/
+/league.json
+/transactions/
+/replays/
